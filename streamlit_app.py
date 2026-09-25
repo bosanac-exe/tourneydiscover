@@ -8,6 +8,7 @@ import streamlit as st
 import streamlit.components.v1 as components
 
 from filters import is_relevant, matched_rules
+from update_running_list import DEFAULT_STORE, run as refresh_running_list
 
 STORE_PATH = Path("data") / "tournaments.json"
 SAFE_URL_PREFIX = "https://ota.tournamentsoftware.com/"
@@ -24,9 +25,20 @@ def load_store(path: str) -> dict:
         return json.load(fh)
 
 
-store = load_store(str(STORE_PATH))
+title_col, refresh_col = st.columns([6, 1])
+title_col.title("🎾 Tournament Discovery")
+if refresh_col.button("🔄 Refresh", help="Fetch the latest tournaments now"):
+    with st.spinner("Refreshing tournament list…"):
+        try:
+            result = refresh_running_list(DEFAULT_STORE)
+        except Exception as exc:
+            st.error(f"Refresh failed: {exc}")
+        else:
+            load_store.clear()
+            st.success(f"Refreshed: {result['new']} new, {result['total']} total tournaments.")
+            st.rerun()
 
-st.title("🎾 Tournament Discovery")
+store = load_store(str(STORE_PATH))
 
 if not store or not store.get("tournaments"):
     st.warning("No tournament data yet. Run `python update_running_list.py` first.")
