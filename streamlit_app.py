@@ -8,6 +8,7 @@ import streamlit as st
 import streamlit.components.v1 as components
 
 from filters import is_relevant, matched_rules
+from github_store import refresh_github_store
 from update_running_list import DEFAULT_STORE, run as refresh_running_list
 
 STORE_PATH = Path("data") / "tournaments.json"
@@ -27,10 +28,25 @@ def load_store(path: str) -> dict:
 
 title_col, refresh_col = st.columns([6, 1])
 title_col.title("🎾 Tournament Discovery")
+refresh_notice = st.session_state.pop("refresh_notice", None)
+if refresh_notice:
+    st.warning(refresh_notice)
 if refresh_col.button("🔄 Refresh", help="Fetch the latest tournaments now"):
     with st.spinner("Refreshing tournament list…"):
         try:
-            result = refresh_running_list(DEFAULT_STORE)
+            try:
+                github = st.secrets["github"]
+            except (FileNotFoundError, KeyError):
+                github = None
+            if github is None:
+                result = refresh_running_list(DEFAULT_STORE)
+                st.session_state["refresh_notice"] = (
+                    "Refreshed locally only. Configure GitHub secrets to update the repository."
+                )
+            else:
+                result = refresh_github_store(
+                    DEFAULT_STORE, github["repository"], github["branch"], github["token"]
+                )
         except Exception as exc:
             st.error(f"Refresh failed: {exc}")
         else:
