@@ -9,13 +9,16 @@ import requests
 from update_running_list import run
 
 
-def refresh_github_store(store_path: Path, repository: str, branch: str, token: str) -> dict:
+def refresh_github_store(store_path: Path, repository: str, branch: str, token: str,
+                         progress=None) -> dict:
     url = f"https://api.github.com/repos/{repository}/contents/data/tournaments.json"
     headers = {
         "Accept": "application/vnd.github+json",
         "Authorization": f"Bearer {token}",
         "X-GitHub-Api-Version": "2022-11-28",
     }
+    if progress:
+        progress("Loading the current tournament list from GitHub...")
     response = requests.get(url, headers=headers, params={"ref": branch}, timeout=30)
     response.raise_for_status()
     remote = response.json()
@@ -25,8 +28,10 @@ def refresh_github_store(store_path: Path, repository: str, branch: str, token: 
     with TemporaryDirectory(dir=store_path.parent) as directory:
         temporary_store = Path(directory) / "tournaments.json"
         temporary_store.write_bytes(content)
-        result = run(temporary_store)
+        result = run(temporary_store, progress=progress)
         updated_content = temporary_store.read_bytes()
+        if progress:
+            progress("Publishing the updated tournament list to GitHub...")
         response = requests.put(
             url,
             headers=headers,
