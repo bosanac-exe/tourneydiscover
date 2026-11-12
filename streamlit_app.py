@@ -1,6 +1,6 @@
 """Streamlit view of the running tournament list produced by update_running_list.py."""
 import json
-from datetime import date, datetime
+from datetime import date
 from pathlib import Path
 
 import pandas as pd
@@ -9,7 +9,7 @@ import streamlit.components.v1 as components
 
 from filters import is_relevant, matched_rules
 from github_store import refresh_github_store
-from update_running_list import DEFAULT_STORE, run as refresh_running_list
+from update_running_list import DEFAULT_STORE, format_updated_at, run as refresh_running_list
 
 STORE_PATH = Path("data") / "tournaments.json"
 SAFE_URL_PREFIX = "https://ota.tournamentsoftware.com/"
@@ -32,27 +32,38 @@ refresh_notice = st.session_state.pop("refresh_notice", None)
 if refresh_notice:
     st.warning(refresh_notice)
 if refresh_col.button("🔄 Refresh", help="Fetch the latest tournaments now"):
-    with st.spinner("Refreshing tournament list…"):
+    with st.status("Preparing refresh...") as refresh_status:
         try:
             try:
                 github = st.secrets["github"]
             except (FileNotFoundError, KeyError):
                 github = None
             if github is None:
-                result = refresh_running_list(DEFAULT_STORE)
+                result = refresh_running_list(
+                    DEFAULT_STORE, progress=lambda message: refresh_status.update(label=message)
+                )
                 st.session_state["refresh_notice"] = (
                     "Refreshed locally only. Configure GitHub secrets to update the repository."
                 )
             else:
                 result = refresh_github_store(
-                    DEFAULT_STORE, github["repository"], github["branch"], github["token"]
+                    DEFAULT_STORE, github["repository"], github["branch"], github["token"],
+                    progress=lambda message: refresh_status.update(label=message),
                 )
         except Exception as exc:
+            refresh_status.update(label="Refresh failed", state="error")
             st.error(f"Refresh failed: {exc}")
         else:
             load_store.clear()
-            st.success(f"Refreshed: {result['new']} new, {result['total']} total tournaments.")
+            refresh_status.update(label="Refresh complete", state="complete")
+            st.session_state["refresh_success"] = (
+                f"Refreshed: {result['new']} new, {result['total']} total tournaments."
+            )
             st.rerun()
+
+refresh_success = st.session_state.pop("refresh_success", None)
+if refresh_success:
+    st.success(refresh_success)
 
 store = load_store(str(STORE_PATH))
 
@@ -76,8 +87,7 @@ col1, col2, col3 = st.columns(3)
 col1.metric("Matching tournaments", int(df["relevant"].sum()), help=f"{len(df)} tracked in total")
 col2.metric("Discovered today", new_today)
 updated_at = store.get("updated_at")
-col3.metric("Last updated", datetime.fromisoformat(updated_at).strftime("%Y-%m-%d %H:%M")
-            if updated_at else "—")
+col3.metric("Last updated", format_updated_at(updated_at))
 
 col_a, col_b = st.columns(2)
 only_new = col_a.toggle("Show only tournaments discovered today", value=False)
