@@ -130,7 +130,7 @@ def parse_tournaments(html: str) -> list:
 
 def fetch_all_tournaments(start_date: str, end_date: str, org_group_id: str = DEFAULT_ORG_GROUP_ID,
                            distance: str = "", postal_code: str = "", query: str = "",
-                           max_pages: int = 50) -> list:
+                           max_pages: int = 50, progress=None) -> list:
     session = requests.Session()
     session.headers.update({
         "accept": "*/*",
@@ -148,6 +148,8 @@ def fetch_all_tournaments(start_date: str, end_date: str, org_group_id: str = DE
     latest_tournaments = []
     page = 1
     while page <= max_pages:
+        if progress:
+            progress(f"Searching tournaments (page {page})...")
         payload = build_payload(page, start_date, end_date, org_group_id, distance, postal_code, query)
         resp = session.post(SEARCH_URL, data=payload, timeout=30)
         resp.raise_for_status()
@@ -225,7 +227,7 @@ def parse_entry_open_date(html: str) -> Optional[str]:
 
 
 def fetch_entry_open_dates(urls: list, delay: float = DETAIL_REQUEST_DELAY,
-                            session: Optional[requests.Session] = None) -> dict:
+                            session: Optional[requests.Session] = None, progress=None) -> dict:
     """Maps each tournament URL to detail fields, pausing between requests."""
     session = session or requests.Session()
     # The site returns 404 for the default requests user-agent.
@@ -236,6 +238,8 @@ def fetch_entry_open_dates(urls: list, delay: float = DETAIL_REQUEST_DELAY,
 
     results = {}
     for i, url in enumerate(urls):
+        if progress and (i == 0 or i % 10 == 0 or i == len(urls) - 1):
+            progress(f"Fetching tournament details ({i + 1}/{len(urls)})...")
         if i:
             time.sleep(delay)
         try:
