@@ -12,8 +12,9 @@ Usage:
 import argparse
 import json
 from dataclasses import asdict
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 from fetch_tournaments import DEFAULT_ORG_GROUP_ID, fetch_all_tournaments, fetch_entry_open_dates
 
@@ -88,7 +89,16 @@ def merge(existing: list, fetched: list, discovered_on: str) -> tuple:
     return list(by_id.values()), new_records
 
 
-def run(store_path: Path, today: date | None = None) -> dict:
+def format_updated_at(value: str | None) -> str:
+    if not value:
+        return "—"
+    timestamp = datetime.fromisoformat(value)
+    if timestamp.tzinfo is None:
+        return timestamp.strftime("%Y-%m-%d %H:%M") + " (timezone unknown)"
+    return timestamp.astimezone(ZoneInfo("America/Toronto")).strftime("%Y-%m-%d %H:%M %Z")
+
+
+def run(store_path: Path, today: date | None = None, progress=None) -> dict:
     today = today or date.today()
     start_date = (today + timedelta(days=WINDOW_START_DAYS)).isoformat()
     end_date = add_months(today, WINDOW_END_MONTHS).isoformat()
@@ -99,8 +109,11 @@ def run(store_path: Path, today: date | None = None) -> dict:
         org_group_id=DEFAULT_ORG_GROUP_ID,
         distance=DISTANCE,
         postal_code=POSTAL_CODE,
+        progress=progress,
     )
 
+    if progress:
+        progress(f"Merging {len(fetched)} search results with the running list...")
     store = load_store(store_path)
     records, new_records = merge(store.get("tournaments", []), fetched, today.isoformat())
     records = prune(records, today)
@@ -109,7 +122,9 @@ def run(store_path: Path, today: date | None = None) -> dict:
     # Entry dates and addresses only live on detail pages, so fetch missing details.
     pending = [r["url"] for r in records
                if (not r.get("entry_open_date") or not r.get("maps_url")) and r.get("url")]
-    entry_dates = fetch_entry_open_dates(pending)
+    if progress and not pending:
+        progress("No tournament details need updating.")
+    entry_dates = fetch_entry_open_dates(pending, progress=progress)
     for rec in records:
         details = entry_dates.get(rec.get("url"), {})
         for field in ("entry_open_date", "street_address", "postal_code", "locality", "region",
@@ -118,11 +133,13 @@ def run(store_path: Path, today: date | None = None) -> dict:
                 rec[field] = details[field]
 
     store = {
-        "updated_at": datetime.now().isoformat(timespec="seconds"),
+        "updated_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "search_window": {"start": start_date, "end": end_date},
         "postal_code": POSTAL_CODE,
         "tournaments": records,
     }
+    if progress:
+        progress("Saving the updated tournament list...")
     save_store(store_path, store)
 
     return {
